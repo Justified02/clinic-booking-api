@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clinic Booking</title>
+<style>
+  :root { --bg:#f6f8fa; --card:#fff; --text:#1b2430; --muted:#667085; --brand:#0f766e; --line:#e4e7ec; --bad:#b42318; --ok:#067647; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0e1116; --card:#171b22; --text:#e8ecf1; --muted:#98a2b3; --line:#2a3039; --brand:#2dd4bf; --bad:#f97066; --ok:#47cd89; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; } h2 { font-size:1.1rem; margin:0 0 12px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .slot { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
+  .slot:first-of-type { border-top:0; }
+  .slot b { display:block; } .slot span { color:var(--muted); font-size:.9rem; }
+  button { font:inherit; border:0; border-radius:8px; padding:8px 14px; background:var(--brand); color:#fff; cursor:pointer; }
+  @media (prefers-color-scheme: dark) { button { color:#06201c; } }
+  button.ghost { background:transparent; color:var(--brand); border:1px solid var(--brand); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  input { font:inherit; width:100%; padding:9px 10px; margin:4px 0 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); }
+  label { font-size:.85rem; color:var(--muted); }
+  .msg { padding:10px 12px; border-radius:8px; margin-top:12px; }
+  .msg.err { background:color-mix(in srgb,var(--bad) 14%,transparent); color:var(--bad); }
+  .msg.ok { background:color-mix(in srgb,var(--ok) 14%,transparent); color:var(--ok); }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 16px; margin:8px 0 0; } dt { color:var(--muted); } dd { margin:0; word-break:break-all; }
+  .hidden { display:none; } .row { display:flex; gap:8px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Clinic Booking</h1>
+  <p class="sub">Pick an open slot, enter your details, and get a confirmation.</p>
+
+  <div class="card" id="keyCard">
+    <label for="key">API key</label>
+    <div class="row"><input id="key" type="password" placeholder="Paste your API key" style="flex:1;margin:4px 0 0"><button id="saveKey" class="ghost">Save</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Available slots</h2>
+    <div id="slots">Loading…</div>
+  </div>
+
+  <div class="card hidden" id="formCard">
+    <h2>Book: <span id="chosen"></span></h2>
+    <label for="name">Full name</label><input id="name" autocomplete="name">
+    <label for="email">Email</label><input id="email" type="email" autocomplete="email">
+    <div class="row"><button id="book">Confirm booking</button><button id="cancelForm" class="ghost">Back</button></div>
+    <div id="formMsg"></div>
+  </div>
+
+  <div class="card hidden" id="confirmCard">
+    <h2>✅ Booking confirmed</h2>
+    <dl id="confirmDl"></dl>
+    <div class="row" style="margin-top:14px"><button id="cancelBooking" class="ghost">Cancel this booking</button><button id="another">Book another</button></div>
+    <div id="confirmMsg"></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const API = "";  // same origin as the API
+let key = localStorage.getItem("apikey") || "__PREFILL_KEY__";
+let selected = null, lastBooking = null, idemKey = null;
+$("key").value = key;
+if (key) $("keyCard").classList.add("hidden");
+$("saveKey").onclick = () => { key = $("key").value.trim(); localStorage.setItem("apikey", key); load(); $("keyCard").classList.add("hidden"); };
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, { ...opts, headers: { "X-API-Key": key, "Content-Type": "application/json", ...(opts.headers || {}) } });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) $("keyCard").classList.remove("hidden");
+  return { res, data };
+}
+const fmt = iso => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+function show(el, cls, text) {
+  el.innerHTML = "";
+  if (!text) return;
+  const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text; el.appendChild(d);
+}
+
+async function load() {
+  const { res, data } = await api("/slots");
+  if (!res.ok) { $("slots").textContent = data.error || "Could not load slots"; return; }
+  const now = Date.now();
+  const list = data.slots.filter(s => new Date(s.start) > now);
+  $("slots").innerHTML = list.length ? "" : "No upcoming slots.";
+  for (const s of list) {
+    const div = document.createElement("div"); div.className = "slot";
+    div.innerHTML = `<div><b></b><span></span></div>`;
+    div.querySelector("b").textContent = `${fmt(s.start)} – ${new Date(s.end).toLocaleTimeString([], { timeStyle: "short" })}`;
+    div.querySelector("span").textContent = s.provider + (s.available ? "" : " · Booked");
+    const b = document.createElement("button"); b.textContent = s.available ? "Book" : "Taken"; b.disabled = !s.available;
+    b.onclick = () => choose(s); div.appendChild(b); $("slots").appendChild(div);
+  }
+}
+function choose(s) {
+  selected = s; idemKey = crypto.randomUUID();  // one key per booking attempt -> safe to retry
+  $("chosen").textContent = `${s.provider}, ${fmt(s.start)}`;
+  show($("formMsg")); $("formCard").classList.remove("hidden"); $("confirmCard").classList.add("hidden");
+  $("name").focus();
+}
+$("cancelForm").onclick = () => $("formCard").classList.add("hidden");
+$("book").onclick = async () => {
+  $("book").disabled = true; show($("formMsg"));
+  const { res, data } = await api("/bookings", { method: "POST", headers: { "Idempotency-Key": idemKey },
+    body: JSON.stringify({ slot_id: selected.id, name: $("name").value, email: $("email").value }) });
+  $("book").disabled = false;
+  if (res.status === 201) {
+    lastBooking = data; $("formCard").classList.add("hidden"); $("confirmCard").classList.remove("hidden");
+    $("confirmDl").innerHTML = ""; show($("confirmMsg"));
+    const rows = [["Booking ID", data.id], ["Provider", selected.provider], ["Time", fmt(selected.start)], ["Name", data.name], ["Email", data.email], ["Status", data.status]];
+    for (const [k, v] of rows) { const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = v; $("confirmDl").append(dt, dd); }
+    load();
+  } else if (res.status === 409) { show($("formMsg"), "err", "Sorry, someone just booked that slot. Pick another."); load(); }
+  else if (res.status === 429) show($("formMsg"), "err", `Too many attempts. Try again in ${res.headers.get("Retry-After")}s.`);
+  else show($("formMsg"), "err", data.error || "Something went wrong");
+};
+$("cancelBooking").onclick = async () => {
+  const { res, data } = await api("/bookings/" + lastBooking.id, { method: "DELETE" });
+  if (res.ok) { show($("confirmMsg"), "ok", "Booking cancelled."); $("cancelBooking").disabled = true; load(); }
+  else show($("confirmMsg"), "err", data.error || "Could not cancel");
+};
+$("another").onclick = () => { $("confirmCard").classList.add("hidden"); window.scrollTo(0, 0); };
+load();
+</script>
+</body>
+</html>

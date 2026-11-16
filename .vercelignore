@@ -1,0 +1,5 @@
+.venv
+tests
+clinic.db
+LOOM_GUIDE.md
+render.yaml
